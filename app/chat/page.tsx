@@ -5,7 +5,7 @@ import { User } from '@/types';
 import { Button, Dialog, DialogPanel, DialogTitle } from '@headlessui/react';
 import { formatDistanceToNow } from 'date-fns';
 import { useRouter, useSearchParams } from 'next/navigation';
-import { useEffect, useRef, useState } from 'react';
+import { Suspense, useEffect, useRef, useState } from 'react';
 import io, { Socket } from 'socket.io-client';
 import { useRoom } from '../context/RoomContext';
 import { useUser } from '../context/UserContext';
@@ -21,7 +21,8 @@ interface OnlineUserInfo {
     userName: string;
 }
 
-const ChatPage = () => {
+// Separate component to use searchParams
+const ChatContent = () => {
     const searchParams = useSearchParams();
     const roomId = searchParams.get('roomId');
     const { user, setUser } = useUser();
@@ -351,6 +352,15 @@ const ChatPage = () => {
 
             <ChatInput onSendMessage={handleSendMessage} />
         </div>
+    );
+};
+
+// Main page component with Suspense
+const ChatPage = () => {
+    return (
+        <Suspense fallback={<Loader />}>
+            <ChatContent />
+        </Suspense>
     );
 };
 
