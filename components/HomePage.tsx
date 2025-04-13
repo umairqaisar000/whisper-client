@@ -8,8 +8,8 @@ import { jwtDecode } from "jwt-decode";
 import { useRouter, useSearchParams } from "next/navigation";
 import { useState } from "react";
 
-
-const HomePage = () => {
+// Component that uses searchParams
+const HomePageContent = () => {
     const [username, setUsername] = useState('');
     const [isLoading, setIsLoading] = useState(false);
     const searchParams = useSearchParams();
@@ -88,6 +88,12 @@ const HomePage = () => {
             </div>
         </main>
     );
-}
+};
 
-export default HomePage
+// Export a wrapper component for HomePage
+const HomePage = () => {
+    return <HomePageContent />;
+};
+
+export { HomePage, HomePageContent };
+export default HomePage;

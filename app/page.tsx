@@ -1,6 +1,13 @@
-import { HomePage } from "@/components";
+"use client";
 
+import { Loader } from "@/components";
+import { HomePageContent } from "@/components/HomePage";
+import { Suspense } from "react";
 
 export default function Home() {
-  return <HomePage />
+  return (
+    <Suspense fallback={<Loader />}>
+      <HomePageContent />
+    </Suspense>
+  );
 }
