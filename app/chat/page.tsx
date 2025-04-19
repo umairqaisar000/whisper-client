@@ -367,22 +367,25 @@ const ChatUI = ({ roomId }: ChatUIProps) => {
     );
 };
 
-// Separate component to use searchParams
+// Separate component to use searchParams - let the page-level Suspense handle it
 const ChatContent = () => {
     return (
-        <Suspense fallback={<Loader />}>
-            <SearchParamsWrapper
-                render={(searchParams) => {
-                    const roomId = searchParams.get('roomId');
-                    return <ChatUI roomId={roomId} />;
-                }}
-            />
-        </Suspense>
+        <SearchParamsWrapper
+            render={(searchParams) => {
+                const roomId = searchParams.get('roomId');
+                return <ChatUI roomId={roomId} />;
+            }}
+        />
     );
 };
 
+// Page component with Suspense at page level
 const ChatPage = () => {
-    return <ChatContent />;
+    return (
+        <Suspense fallback={<Loader />}>
+            <ChatContent />
+        </Suspense>
+    );
 };
 
 export default ChatPage;

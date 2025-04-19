@@ -2,12 +2,11 @@
 
 import { useRoom } from "@/app/context/RoomContext";
 import { useUser } from "@/app/context/UserContext";
-import { Loader } from "@/components";
 import { JwtPayload, Room } from "@/types";
 import axios from "axios";
 import { jwtDecode } from "jwt-decode";
 import { ReadonlyURLSearchParams, useRouter, useSearchParams } from "next/navigation";
-import { ReactNode, Suspense, useState } from "react";
+import { ReactNode, useState } from "react";
 
 // Separate component that uses searchParams
 interface SearchParamsWrapperProps {
@@ -103,17 +102,15 @@ const HomePageUI = ({ paramRoomId }: HomePageUIProps) => {
     );
 };
 
-// Component that connects searchParams with UI
+// Component that connects searchParams with UI - let the page-level Suspense handle it
 const HomePageContent = () => {
     return (
-        <Suspense fallback={<Loader />}>
-            <SearchParamsWrapper
-                render={(searchParams) => {
-                    const paramRoomId = searchParams.get('roomId');
-                    return <HomePageUI paramRoomId={paramRoomId} />;
-                }}
-            />
-        </Suspense>
+        <SearchParamsWrapper
+            render={(searchParams) => {
+                const paramRoomId = searchParams.get('roomId');
+                return <HomePageUI paramRoomId={paramRoomId} />;
+            }}
+        />
     );
 };
 
