@@ -4,6 +4,7 @@ import { ChatInput, Loader } from '@/components';
 import { User } from '@/types';
 import { Button, Dialog, DialogPanel, DialogTitle } from '@headlessui/react';
 import { formatDistanceToNow } from 'date-fns';
+import { jwtDecode } from 'jwt-decode';
 import { ReadonlyURLSearchParams, useRouter, useSearchParams } from 'next/navigation';
 import { ReactNode, Suspense, useEffect, useRef, useState } from 'react';
 import io, { Socket } from 'socket.io-client';
@@ -50,6 +51,8 @@ const ChatUI = ({ roomId }: ChatUIProps) => {
     const [onlineUsersList, setOnlineUsersList] = useState<OnlineUserInfo[]>([]);
     const [showOnlineUsers, setShowOnlineUsers] = useState(false);
     const onlineUsersRef = useRef<HTMLDivElement>(null);
+    const [connectionError, setConnectionError] = useState(false);
+    const [authError, setAuthError] = useState(false);
 
     useEffect(() => {
         // Handle clicking outside the online users dropdown
@@ -115,41 +118,182 @@ const ChatUI = ({ roomId }: ChatUIProps) => {
         return userInList ? onlineUsers - 1 : onlineUsers;
     };
 
+    // Add a function to refresh token by redirecting to login
+    const handleRefreshToken = () => {
+        sessionStorage.removeItem('token');
+        router.push(`/?roomId=${roomId}`);
+    };
+
+    // Add a function to attempt to refresh token without redirecting
+    const attemptTokenRefresh = async () => {
+        if (!user) return false;
+
+        try {
+            setIsLoading(true);
+            // Try to get a new token using the existing user info
+            const response = await fetch(`${process.env.NEXT_PUBLIC_BACKEND_API_URL}/user/api/auth/refresh-token`, {
+                method: 'POST',
+                headers: {
+                    'Content-Type': 'application/json',
+                },
+                body: JSON.stringify({
+                    userName: user.userName,
+                    roomId: roomId
+                })
+            });
+
+            if (response.ok) {
+                const data = await response.json();
+                sessionStorage.setItem('token', data.token);
+                setAuthError(false);
+                setIsLoading(false);
+                // Return true to indicate success
+                return true;
+            }
+            return false;
+        } catch (error) {
+            console.error('Failed to refresh token:', error);
+            return false;
+        } finally {
+            setIsLoading(false);
+        }
+    };
+
+    // Add a function to check if the backend is reachable
+    const checkBackendConnectivity = async () => {
+        try {
+            const apiUrl = process.env.NEXT_PUBLIC_BACKEND_API_URL;
+            const response = await fetch(`${apiUrl}/health-check`, {
+                method: 'GET',
+                headers: { 'Content-Type': 'application/json' },
+                mode: 'cors',
+                // Timeout after 10 seconds
+                signal: AbortSignal.timeout(10000)
+            });
+            return response.ok;
+        } catch (error) {
+            console.error('Backend connectivity check failed:', error);
+            return false;
+        }
+    };
+
     useEffect(() => {
         if (!user) {
             router.push(`/?roomId=${roomId}`);
         } else {
-            const newSocket = io(`${process.env.NEXT_PUBLIC_BACKEND_SOCKET_API_URL}`, {
-                query: { token: sessionStorage.getItem('token'), roomId }
-            });
+            // Check if server is available first to avoid hanging connection attempts
+            const connectToSocket = async () => {
+                setIsLoading(true);
+                try {
+                    // Check if token exists
+                    const token = sessionStorage.getItem('token');
+                    if (!token) {
+                        setAuthError(true);
+                        setIsLoading(false);
+                        return;
+                    }
 
-            newSocket.on('chat-message', (messageData) => {
-                if (messageData.user.id !== user.id) {
-                    addMessage(messageData.user, messageData.message);
+                    // Check if token is expired
+                    try {
+                        const decodedToken = jwtDecode(token);
+                        const currentTime = Date.now() / 1000;
+                        // Consider token expired if it's within 5 minutes of expiration
+                        // to account for possible clock differences between client and server
+                        if (decodedToken.exp && (decodedToken.exp - currentTime < 300)) {
+                            // Token is expired or about to expire
+                            console.log('Token expired or about to expire');
+                            setAuthError(true);
+                            sessionStorage.removeItem('token');
+                            setIsLoading(false);
+                            setTimeout(() => {
+                                router.push(`/?roomId=${roomId}`);
+                            }, 1000);
+                            return;
+                        }
+                    } catch (tokenError) {
+                        console.error('Invalid token:', tokenError);
+                        setAuthError(true);
+                        setIsLoading(false);
+                        return;
+                    }
+
+                    // Optionally check server connectivity first
+                    // const isBackendUp = await checkBackendConnectivity();
+                    // if (!isBackendUp) {
+                    //     throw new Error("Backend server appears to be down");
+                    // }
+
+                    const newSocket = io(`${process.env.NEXT_PUBLIC_BACKEND_SOCKET_API_URL}`, {
+                        query: { token: sessionStorage.getItem('token'), roomId },
+                        reconnectionAttempts: 5,
+                        reconnectionDelay: 1000,
+                        timeout: 20000,
+                        transports: ['websocket', 'polling'] // Try websocket first, fallback to polling
+                    });
+
+                    // Add connection error handling
+                    newSocket.on('connect_error', (error) => {
+                        console.error('Socket connection error:', error);
+                        if (error.message === 'Authentication error') {
+                            setAuthError(true);
+                            // Clear invalid token
+                            sessionStorage.removeItem('token');
+                            setIsLoading(false);
+
+                            // Try to refresh token automatically first
+                            attemptTokenRefresh().then(success => {
+                                if (!success) {
+                                    // If token refresh fails, redirect to login after a short delay
+                                    setTimeout(() => {
+                                        router.push(`/?roomId=${roomId}`);
+                                    }, 1500);
+                                }
+                            });
+                        } else {
+                            setConnectionError(true);
+                        }
+                    });
+
+                    newSocket.on('connect', () => {
+                        console.log('Socket connected successfully');
+                        setConnectionError(false);
+                    });
+
+                    newSocket.on('chat-message', (messageData) => {
+                        if (messageData.user.id !== user.id) {
+                            addMessage(messageData.user, messageData.message);
+                        }
+                    });
+
+                    newSocket.on('chat-history', (chatHistory) => {
+                        setMessages(chatHistory.map((msg: Message) => ({
+                            ...msg,
+                            timestamp: msg.timestamp ? new Date(msg.timestamp) : new Date()
+                        })));
+                    });
+
+                    newSocket.on('online-users', (count) => {
+                        setOnlineUsers(count);
+                    });
+
+                    newSocket.on('online-users-list', (usersList: OnlineUserInfo[]) => {
+                        setOnlineUsersList(usersList);
+                    });
+
+                    setSocket(newSocket);
+                    setIsLoading(false);
+
+                    return () => {
+                        newSocket.disconnect();
+                    };
+                } catch (error) {
+                    console.error('Failed to connect to socket server:', error);
+                    setConnectionError(true);
+                    setIsLoading(false);
                 }
-            });
-
-            newSocket.on('chat-history', (chatHistory) => {
-                setMessages(chatHistory.map((msg: Message) => ({
-                    ...msg,
-                    timestamp: msg.timestamp ? new Date(msg.timestamp) : new Date()
-                })));
-            });
-
-            newSocket.on('online-users', (count) => {
-                setOnlineUsers(count);
-            });
-
-            newSocket.on('online-users-list', (usersList: OnlineUserInfo[]) => {
-                setOnlineUsersList(usersList);
-            });
-
-            setSocket(newSocket);
-            setIsLoading(false);
-
-            return () => {
-                newSocket.disconnect();
             };
+
+            connectToSocket();
         }
     }, [user, router, roomId]);
 
@@ -190,6 +334,35 @@ const ChatUI = ({ roomId }: ChatUIProps) => {
 
     return (
         <div className="bg-[#0c0c0e] h-screen flex flex-col max-w-md mx-auto shadow-xl">
+            {connectionError && (
+                <div className="bg-red-600/90 text-white py-2 px-4 text-sm text-center">
+                    Can't connect to chat server. Please try again later.
+                    <button
+                        onClick={() => window.location.reload()}
+                        className="underline ml-2 font-medium">
+                        Reload
+                    </button>
+                </div>
+            )}
+            {authError && (
+                <div className="bg-amber-600/90 text-white py-2 px-4 text-sm">
+                    <div className="flex items-center justify-between">
+                        <span>Authentication failed: Your session has expired.</span>
+                        <div className="flex gap-2">
+                            <button
+                                onClick={() => window.location.reload()}
+                                className="bg-amber-700 hover:bg-amber-800 px-2 py-1 rounded text-xs">
+                                Try Again
+                            </button>
+                            <button
+                                onClick={handleRefreshToken}
+                                className="bg-amber-800 hover:bg-amber-900 px-2 py-1 rounded text-xs">
+                                Login
+                            </button>
+                        </div>
+                    </div>
+                </div>
+            )}
             <div className="bg-[#111114] p-3 border-b border-neutral-800 flex justify-between items-center">
                 <div className="flex items-center gap-2">
                     <div className="h-10 w-10 rounded-full bg-[#1A1A22] flex items-center justify-center">
