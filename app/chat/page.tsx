@@ -4,8 +4,8 @@ import { ChatInput, Loader } from '@/components';
 import { User } from '@/types';
 import { Button, Dialog, DialogPanel, DialogTitle } from '@headlessui/react';
 import { formatDistanceToNow } from 'date-fns';
-import { useRouter, useSearchParams } from 'next/navigation';
-import { Suspense, useEffect, useRef, useState } from 'react';
+import { ReadonlyURLSearchParams, useRouter, useSearchParams } from 'next/navigation';
+import { ReactNode, Suspense, useEffect, useRef, useState } from 'react';
 import io, { Socket } from 'socket.io-client';
 import { useRoom } from '../context/RoomContext';
 import { useUser } from '../context/UserContext';
@@ -22,9 +22,21 @@ interface OnlineUserInfo {
 }
 
 // Separate component to use searchParams
-const ChatContent = () => {
+interface SearchParamsWrapperProps {
+    render: (searchParams: ReadonlyURLSearchParams) => ReactNode;
+}
+
+const SearchParamsWrapper = ({ render }: SearchParamsWrapperProps) => {
     const searchParams = useSearchParams();
-    const roomId = searchParams.get('roomId');
+    return render(searchParams);
+};
+
+// UI Component that doesn't directly use searchParams
+interface ChatUIProps {
+    roomId: string | null;
+}
+
+const ChatUI = ({ roomId }: ChatUIProps) => {
     const { user, setUser } = useUser();
     const router = useRouter();
     const [isLoading, setIsLoading] = useState(true);
@@ -355,13 +367,22 @@ const ChatContent = () => {
     );
 };
 
-// Main page component with Suspense
-const ChatPage = () => {
+// Separate component to use searchParams
+const ChatContent = () => {
     return (
         <Suspense fallback={<Loader />}>
-            <ChatContent />
+            <SearchParamsWrapper
+                render={(searchParams) => {
+                    const roomId = searchParams.get('roomId');
+                    return <ChatUI roomId={roomId} />;
+                }}
+            />
         </Suspense>
     );
+};
+
+const ChatPage = () => {
+    return <ChatContent />;
 };
 
 export default ChatPage;

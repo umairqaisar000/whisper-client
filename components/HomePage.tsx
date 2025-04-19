@@ -2,18 +2,31 @@
 
 import { useRoom } from "@/app/context/RoomContext";
 import { useUser } from "@/app/context/UserContext";
+import { Loader } from "@/components";
 import { JwtPayload, Room } from "@/types";
 import axios from "axios";
 import { jwtDecode } from "jwt-decode";
-import { useRouter, useSearchParams } from "next/navigation";
-import { useState } from "react";
+import { ReadonlyURLSearchParams, useRouter, useSearchParams } from "next/navigation";
+import { ReactNode, Suspense, useState } from "react";
 
-// Component that uses searchParams
-const HomePageContent = () => {
+// Separate component that uses searchParams
+interface SearchParamsWrapperProps {
+    render: (searchParams: ReadonlyURLSearchParams) => ReactNode;
+}
+
+const SearchParamsWrapper = ({ render }: SearchParamsWrapperProps) => {
+    const searchParams = useSearchParams();
+    return render(searchParams);
+};
+
+// Component with UI but no direct searchParams usage
+interface HomePageUIProps {
+    paramRoomId: string | null;
+}
+
+const HomePageUI = ({ paramRoomId }: HomePageUIProps) => {
     const [username, setUsername] = useState('');
     const [isLoading, setIsLoading] = useState(false);
-    const searchParams = useSearchParams();
-    let paramRoomId = searchParams.get('roomId');
     const router = useRouter();
     const { setRoom } = useRoom();
     const { setUser } = useUser();
@@ -87,6 +100,20 @@ const HomePageContent = () => {
                 </div>
             </div>
         </main>
+    );
+};
+
+// Component that connects searchParams with UI
+const HomePageContent = () => {
+    return (
+        <Suspense fallback={<Loader />}>
+            <SearchParamsWrapper
+                render={(searchParams) => {
+                    const paramRoomId = searchParams.get('roomId');
+                    return <HomePageUI paramRoomId={paramRoomId} />;
+                }}
+            />
+        </Suspense>
     );
 };
 
